@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_SETTINGS, decodeSettings, isStoredImage } from "../src/client/settings.ts";
+import type { BrandSettings } from "../src/client/settings.ts";
+import {
+  DEFAULT_SETTINGS,
+  decodeSettings,
+  isStoredImage,
+  readServerSettings,
+  settingsFromRaw,
+} from "../src/client/settings.ts";
 import { BrandStore } from "../src/client/store.ts";
+
+const PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aKx8AAAAASUVORK5CYII=";
 
 test("untrusted saved settings cannot introduce URLs, control characters, or unsupported schemas", () => {
   assert.equal(decodeSettings({ ...DEFAULT_SETTINGS, version: 2 }), null);
@@ -15,46 +25,68 @@ test("untrusted saved settings cannot introduce URLs, control characters, or uns
   );
 });
 
-test("a storage failure retains the prior active settings and emits no change", () => {
+test("injected branding is normalized and malformed input falls back to official defaults", () => {
+  const config = {
+    name: "DFY",
+    badge: "",
+    logo: PNG,
+    wordmark: "",
+    customizeTitle: false,
+    nameMode: "image",
+    logoSize: 20,
+    logoRadius: 3,
+  };
+  const settings = settingsFromRaw(config);
+  assert.equal(settings.name, "DFY");
+  assert.equal(settings.badge, null);
+  assert.equal(settings.logo, PNG);
+  assert.equal(settings.wordmark, null);
+  assert.equal(settings.nameMode, "image");
+  assert.equal(settings.logoSize, 20);
+  assert.deepEqual(readServerSettings({ __DSH_BRAND_STUDIO_CONFIG__: config }), settings);
+  assert.deepEqual(readServerSettings({}), { ...DEFAULT_SETTINGS });
+  assert.deepEqual(readServerSettings({ __DSH_BRAND_STUDIO_CONFIG__: null }), {
+    ...DEFAULT_SETTINGS,
+  });
+  assert.deepEqual(readServerSettings({ __DSH_BRAND_STUDIO_CONFIG__: { logo: "https://x" } }), {
+    ...DEFAULT_SETTINGS,
+  });
+});
+
+test("a refused write retains the prior active settings and emits no change", async () => {
   const store = new BrandStore({
-    getItem: () => null,
-    setItem: () => {
-      throw new Error("quota");
+    save: async () => {
+      throw new Error("forbidden");
     },
   });
   let changes = 0;
   store.subscribe(() => changes++);
   const previous = store.getSnapshot();
-  assert.throws(() => store.commit({ ...DEFAULT_SETTINGS, name: "DFY" }), /quota/);
+  await assert.rejects(() => store.commit({ ...DEFAULT_SETTINGS, name: "DFY" }), /forbidden/);
   assert.equal(store.getSnapshot(), previous);
   assert.equal(changes, 0);
 });
 
-test("commit, valid external writes, corrupt writes, and storage clear behave consistently", () => {
-  let stored = "";
+test("commit adopts the host echo and a writer-less store refuses to write", async () => {
+  const captured: BrandSettings[] = [];
   const store = new BrandStore({
-    getItem: () => null,
-    setItem: (_key, value) => {
-      stored = value;
+    save: async (settings) => {
+      captured.push(settings);
+      return { ...settings, name: "ECHO" };
     },
   });
-  store.commit({ ...DEFAULT_SETTINGS, name: "DFY" });
-  assert.equal(JSON.parse(stored).name, "DFY");
-  store.acceptExternal("not-json");
-  assert.equal(store.getSnapshot().name, "DFY");
-  store.acceptExternal(JSON.stringify({ ...DEFAULT_SETTINGS, name: "DSH" }));
-  assert.equal(store.getSnapshot().name, "DSH");
-  store.acceptExternal(null);
-  assert.deepEqual(store.getSnapshot(), DEFAULT_SETTINGS);
-});
+  const next = await store.commit({ ...DEFAULT_SETTINGS, name: "DFY" });
+  assert.equal(captured[0]?.name, "DFY");
+  assert.equal(next.name, "ECHO");
+  assert.equal(store.getSnapshot().name, "ECHO");
 
-test("malformed startup storage and unavailable storage do not break initialization", () => {
-  const store = new BrandStore({ getItem: () => "{bad", setItem: () => {} });
-  assert.deepEqual(store.getSnapshot(), DEFAULT_SETTINGS);
-  assert.throws(
-    () => new BrandStore(null).commit({ ...DEFAULT_SETTINGS, name: "DFY" }),
-    /storage-unavailable/,
+  const fixed = new BrandStore(null, { ...DEFAULT_SETTINGS, name: "BASE" });
+  assert.equal(fixed.getSnapshot().name, "BASE");
+  await assert.rejects(
+    () => fixed.commit({ ...DEFAULT_SETTINGS, name: "DFY" }),
+    /save-unavailable/,
   );
+  assert.equal(fixed.getSnapshot().name, "BASE");
 });
 
 test("older saved settings retain title choice and migrate image mode and logo controls", () => {

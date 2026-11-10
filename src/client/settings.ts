@@ -105,10 +105,58 @@ export function equalSettings(a: BrandSettings, b: BrandSettings): boolean {
   );
 }
 
-export function browserStorage(): Storage | null {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
+/** Profile entry id declared by this bundle's cordis.patch.yml. */
+export const ENTRY_ID = "ui-brand-studio";
+
+/** Global key the host injects into the index document. */
+export const BRAND_CONFIG_GLOBAL = "__DSH_BRAND_STUDIO_CONFIG__";
+
+interface RawBrandConfig {
+  name?: unknown;
+  badge?: unknown;
+  logo?: unknown;
+  wordmark?: unknown;
+  customizeTitle?: unknown;
+  nameMode?: unknown;
+  logoSize?: unknown;
+  logoRadius?: unknown;
+}
+
+/**
+ * Normalize a raw branding record — from the injected global or a settings
+ * view — into settings the UI can render. Anything malformed collapses to the
+ * official appearance instead of breaking boot.
+ */
+export function settingsFromRaw(value: RawBrandConfig): BrandSettings {
+  const text = (input: unknown) =>
+    typeof input === "string" && input.trim().length > 0 ? input : null;
+  return (
+    decodeSettings({
+      ...DEFAULT_SETTINGS,
+      name: text(value.name),
+      badge: text(value.badge),
+      logo: text(value.logo),
+      wordmark: text(value.wordmark),
+      customizeTitle:
+        typeof value.customizeTitle === "boolean"
+          ? value.customizeTitle
+          : DEFAULT_SETTINGS.customizeTitle,
+      nameMode: value.nameMode ?? DEFAULT_SETTINGS.nameMode,
+      logoSize: value.logoSize ?? DEFAULT_SETTINGS.logoSize,
+      logoRadius: value.logoRadius ?? DEFAULT_SETTINGS.logoRadius,
+    }) ?? { ...DEFAULT_SETTINGS }
+  );
+}
+
+/**
+ * Read the deployment-owned branding the host injects before this bundle runs.
+ * The value is already present at boot, so the first render carries the
+ * administrator's logo without an async round trip.
+ */
+export function readServerSettings(
+  source: Record<string, unknown> = globalThis as unknown as Record<string, unknown>,
+): BrandSettings {
+  const raw = source[BRAND_CONFIG_GLOBAL];
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { ...DEFAULT_SETTINGS };
+  return settingsFromRaw(raw as RawBrandConfig);
 }

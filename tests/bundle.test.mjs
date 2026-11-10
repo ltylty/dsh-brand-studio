@@ -5,19 +5,12 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { SlotCore } from "@deepseek-ai/dsh-client-ui-slots";
 
-test("built client preserves official slots, applies branding, and releases its resources", () => {
+test("built client preserves official slots, applies branding, and releases its resources", async () => {
   const core = new SlotCore();
   const official = () => null;
   const cleanup = [];
   let styleCount = 0;
-  let storageListenerCount = 0;
-  let stored = null;
-  const storage = {
-    getItem: () => stored,
-    setItem: (_key, value) => {
-      stored = value;
-    },
-  };
+  const writes = [];
   core.register(
     {
       name: "root",
@@ -35,14 +28,13 @@ test("built client preserves official slots, applies branding, and releases its 
 
   let registration;
   const window = {
-    localStorage: storage,
     __ModuleLoader__: {
       load: (value) => {
         registration = value;
       },
     },
-    addEventListener: () => storageListenerCount++,
-    removeEventListener: () => storageListenerCount--,
+    addEventListener: () => {},
+    removeEventListener: () => {},
   };
   const document = {
     title: "DeepSeek Harness",
@@ -80,6 +72,18 @@ test("built client preserves official slots, applies branding, and releases its 
     }
     return require(id);
   });
+  const remote = {
+    settings: {
+      async mutate(ns, ops) {
+        writes.push({ ns, ops });
+        return {
+          ns,
+          revision: writes.length,
+          value: Object.fromEntries(ops.map((op) => [op.path[0], op.value])),
+        };
+      },
+    },
+  };
   client.apply({
     effect: (callback) => cleanup.push(callback()),
     locale: { register: () => () => {}, bind: () => (key) => key },
@@ -87,34 +91,34 @@ test("built client preserves official slots, applies branding, and releases its 
       inject: (_name, callback) => cleanup.push(callback()),
       register: (options, component) => core.register(options, component),
     },
+    remote,
   });
   assert.equal(styleCount, 1);
-  assert.equal(storageListenerCount, 1);
   assert.equal(core.entriesOfSlot("sidebar.brand.name")[0].component, official);
   const panel = core.entriesOfSlot("settings.section")[0];
   const { hooks, save } = panel.inject();
   const defaults = hooks.settings.getSnapshot();
-  save({ ...defaults, name: "大肥鱼", badge: "" });
+  await save({ ...defaults, name: "大肥鱼", badge: "" });
+  assert.equal(writes.at(-1).ns, "ui-brand-studio");
+  assert.equal(writes.at(-1).ops.find((op) => op.path[0] === "name").value, "大肥鱼");
   const replacement = core.entriesOfSlot("sidebar.brand.name")[0];
   assert.equal(replacement.options.priority, -10);
   assert.notEqual(replacement.component, official);
   assert.equal(core.entriesOfSlot("sidebar.brand.mark")[0].component, official);
-  assert.equal(JSON.parse(stored).name, "大肥鱼");
-  save({ ...defaults, name: "DFY" });
+  await save({ ...defaults, name: "DFY" });
   assert.equal(core.entriesOfSlot("sidebar.brand.name")[0], replacement);
   const logo =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aKx8AAAAASUVORK5CYII=";
-  save({ ...defaults, logo });
+  await save({ ...defaults, logo });
   assert.equal(core.entriesOfSlot("sidebar.brand.mark")[0].options.priority, -10);
   assert.equal(core.entriesOfSlot("conversation.hero.brand.mark")[0].options.priority, -10);
-  save(defaults);
+  await save(defaults);
   assert.equal(core.entriesOfSlot("conversation.hero.brand.mark").length, 0);
   assert.equal(core.entriesOfSlot("sidebar.brand.mark")[0].component, official);
   assert.equal(core.entriesOfSlot("sidebar.brand.name")[0].component, official);
-  save({ ...defaults, name: "DSH" });
+  await save({ ...defaults, name: "DSH" });
   for (const dispose of cleanup.reverse()) dispose?.();
   assert.equal(styleCount, 0);
-  assert.equal(storageListenerCount, 0);
   assert.equal(core.entriesOfSlot("settings.section").length, 0);
   assert.equal(core.entriesOfSlot("sidebar.brand.name")[0].component, official);
 });

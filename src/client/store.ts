@@ -4,27 +4,22 @@ import {
   DEFAULT_SETTINGS,
   decodeSettings,
   equalSettings,
-  STORAGE_KEY,
+  readServerSettings,
 } from "./settings.ts";
 
-export interface SettingsStorage {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
+/** Persists branding where the host owns it (the profile settings document). */
+export interface BrandWriter {
+  save(settings: BrandSettings): Promise<BrandSettings>;
 }
 
 export class BrandStore implements ObservableSnapshot<BrandSettings> {
-  private snapshot: BrandSettings = { ...DEFAULT_SETTINGS };
+  private snapshot: BrandSettings;
   private readonly listeners = new Set<() => void>();
-  private readonly storage: SettingsStorage | null;
+  private readonly writer: BrandWriter | null;
 
-  constructor(storage: SettingsStorage | null) {
-    this.storage = storage;
-    try {
-      const raw = storage?.getItem(STORAGE_KEY);
-      if (raw) this.snapshot = decodeSettings(JSON.parse(raw)) ?? { ...DEFAULT_SETTINGS };
-    } catch {
-      // Unavailable or malformed storage must never prevent DSH from booting.
-    }
+  constructor(writer: BrandWriter | null = null, initial: BrandSettings = readServerSettings()) {
+    this.writer = writer;
+    this.snapshot = decodeSettings(initial) ?? { ...DEFAULT_SETTINGS };
   }
 
   getSnapshot = (): BrandSettings => this.snapshot;
@@ -36,27 +31,24 @@ export class BrandStore implements ObservableSnapshot<BrandSettings> {
     };
   };
 
-  commit(value: BrandSettings): BrandSettings {
+  /**
+   * Persist through the writer and adopt the value the host echoes back. The
+   * previous branding stays active when the write fails, so a refused edit
+   * never leaves the page in a half-applied state.
+   */
+  async commit(value: BrandSettings): Promise<BrandSettings> {
     const settings = decodeSettings(value);
     if (!settings) throw new Error("invalid-settings");
-    if (!this.storage) throw new Error("storage-unavailable");
-    // Persist first: quota/privacy errors leave the active branding untouched.
-    this.storage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    this.publish(settings);
+    if (!this.writer) throw new Error("save-unavailable");
+    const next = decodeSettings(await this.writer.save(settings)) ?? settings;
+    this.publish(next);
     return this.snapshot;
   }
 
-  acceptExternal(raw: string | null): void {
-    if (raw === null) {
-      this.publish({ ...DEFAULT_SETTINGS });
-      return;
-    }
-    try {
-      const settings = decodeSettings(JSON.parse(raw));
-      if (settings) this.publish(settings);
-    } catch {
-      // Ignore malformed writes by other tabs; keep the last valid snapshot.
-    }
+  /** Adopt a server view without writing. */
+  accept(value: BrandSettings): void {
+    const settings = decodeSettings(value);
+    if (settings) this.publish(settings);
   }
 
   private publish(value: BrandSettings): void {

@@ -13,7 +13,7 @@ test("only the official title or its final product suffix is replaced", () => {
   assert.equal(brandTitle("Another plugin's title", "DFY"), null);
 });
 
-test("session changes, brand edits, disable, and disposal retain title ownership", () => {
+test("session changes, brand edits, disable, and disposal retain title ownership", async () => {
   const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "document");
   const observerDescriptor = Object.getOwnPropertyDescriptor(globalThis, "MutationObserver");
   const doc = { head: {}, title: "First — DeepSeek Harness" };
@@ -29,18 +29,18 @@ test("session changes, brand edits, disable, and disposal retain title ownership
   Object.defineProperty(globalThis, "MutationObserver", { configurable: true, value: Observer });
   let dispose = () => {};
   try {
-    const store = new BrandStore({ getItem: () => null, setItem: () => {} });
+    const store = new BrandStore({ save: async (settings) => settings }, { ...DEFAULT_SETTINGS });
     dispose = installTitle(store);
-    store.commit({ ...DEFAULT_SETTINGS, name: "DFY", customizeTitle: true });
+    await store.commit({ ...DEFAULT_SETTINGS, name: "DFY", customizeTitle: true });
     assert.equal(doc.title, "First — DFY");
     doc.title = "Second — DeepSeek Harness";
     notify();
     assert.equal(doc.title, "Second — DFY");
-    store.commit({ ...DEFAULT_SETTINGS, name: "DSH", customizeTitle: true });
+    await store.commit({ ...DEFAULT_SETTINGS, name: "DSH", customizeTitle: true });
     assert.equal(doc.title, "Second — DSH");
-    store.commit({ ...DEFAULT_SETTINGS, name: "DSH", customizeTitle: false });
+    await store.commit({ ...DEFAULT_SETTINGS, name: "DSH", customizeTitle: false });
     assert.equal(doc.title, "Second — DeepSeek Harness");
-    store.commit({ ...DEFAULT_SETTINGS, name: "DSH", customizeTitle: true });
+    await store.commit({ ...DEFAULT_SETTINGS, name: "DSH", customizeTitle: true });
     doc.title = "Another plugin's title";
     dispose();
     assert.equal(doc.title, "Another plugin's title");

@@ -13,7 +13,7 @@ import type { BrandKey, NS } from "./locales.ts";
 import { type BrandSettings, DEFAULT_SETTINGS, equalSettings } from "./settings.ts";
 
 export interface PanelProps extends BrandSourceProps, PropsLocale<typeof NS> {
-  save: (settings: BrandSettings) => BrandSettings;
+  save: (settings: BrandSettings) => Promise<BrandSettings>;
 }
 
 export function BrandingPanel({ useSettings, save, t }: PanelProps) {
@@ -65,9 +65,10 @@ export function BrandingPanel({ useSettings, save, t }: PanelProps) {
       if (ticket === generation.current) setBusy(false);
     }
   };
-  const apply = () => {
+  const apply = async () => {
+    setBusy(true);
     try {
-      const next = save(draft);
+      const next = await save(draft);
       base.current = next;
       setDraft(next);
       setError(null);
@@ -75,6 +76,8 @@ export function BrandingPanel({ useSettings, save, t }: PanelProps) {
     } catch {
       setError("storageError");
       setMessage(false);
+    } finally {
+      setBusy(false);
     }
   };
   const imageControl = (key: "logo" | "wordmark") => (
