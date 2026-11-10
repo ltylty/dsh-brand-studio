@@ -41,10 +41,14 @@ function settingsToOps(settings: BrandSettings) {
 }
 
 export function apply(ctx: Context): void {
-  const remote = (ctx as unknown as { remote: { settings: SettingsRemote } }).remote.settings;
   const store = new BrandStore({
     async save(settings) {
-      const view = await remote.mutate(ENTRY_ID, settingsToOps(settings));
+      const remote = (ctx as unknown as { remote?: { settings?: SettingsRemote } }).remote
+        ?.settings;
+      if (remote === undefined || typeof remote.mutate !== "function") {
+        throw new Error("remote.settings unavailable");
+      }
+      const view = await remote.mutate(ENTRY_ID, settingsToOps(settings), undefined);
       return view?.value ? settingsFromRaw(view.value) : settings;
     },
   });

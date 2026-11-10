@@ -20,6 +20,7 @@ export function BrandingPanel({ useSettings, save, t }: PanelProps) {
   const saved = useSettings((settings) => settings);
   const [draft, setDraft] = useState(saved);
   const [error, setError] = useState<BrandKey | null>(null);
+  const [detail, setDetail] = useState("");
   const [message, setMessage] = useState(false);
   const [busy, setBusy] = useState(false);
   const base = useRef(saved);
@@ -72,9 +73,12 @@ export function BrandingPanel({ useSettings, save, t }: PanelProps) {
       base.current = next;
       setDraft(next);
       setError(null);
+      setDetail("");
       setMessage(true);
-    } catch {
+    } catch (cause) {
+      console.error("[dsh-brand-studio] save failed", cause);
       setError("storageError");
+      setDetail(cause instanceof Error ? cause.message : String(cause));
       setMessage(false);
     } finally {
       setBusy(false);
@@ -236,6 +240,7 @@ export function BrandingPanel({ useSettings, save, t }: PanelProps) {
       {busy && <p role="status">{t("processing")}</p>}
       {conflict && <p role="alert">{t("conflict")}</p>}
       {error && <p role="alert">{t(error)}</p>}
+      {detail && <p role="alert">{detail}</p>}
       {message && <p role="status">{t("saved")}</p>}
       <div className="dbs-actions">
         <Button
